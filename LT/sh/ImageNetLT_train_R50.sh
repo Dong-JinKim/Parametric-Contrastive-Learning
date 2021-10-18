@@ -15,7 +15,7 @@ PORT=$[$RANDOM + 10000]
 python paco_lt.py \
   --dataset imagenet \
   --arch resnet50 \
-  --data /mnt/proj75/jqcui/Data/ImageNet \
+  --data /data/DJKim/Datasets/ImageNet/ImageNet2012 \
   --alpha 0.05 \
   --beta 1.0 \
   --gamma 1.0 \
