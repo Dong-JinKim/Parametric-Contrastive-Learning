@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import Parameter
+import pdb
 
 class NormedLinear_Classifier(nn.Module):
 
@@ -237,6 +238,7 @@ class MoCo(nn.Module):
 
     def forward(self, im_q, im_k=None, labels=None):
         if self.training:
+           #pdb.set_trace()
            return self._train(im_q, im_k, labels) 
         else:
            return self._inference(im_q)

@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
 from torch.nn import Parameter
+import pdb
 
 __all__ = ['ResNet_s', 'resnet20', 'resnet32', 'resnet44', 'resnet56', 'resnet110', 'resnet1202']
 
@@ -102,6 +103,7 @@ class ResNet_s(nn.Module):
         out = self.layer1(out)
         out = self.layer2(out)
         out = self.layer3(out)
+        #pdb.set_trace()
         out = self.avgpool(out)
         encoding = out.view(out.size(0), -1)
         out = self.fc(encoding)
