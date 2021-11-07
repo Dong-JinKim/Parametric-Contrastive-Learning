@@ -70,7 +70,7 @@ class BasicBlock(nn.Module):
 
 class ResNet_s(nn.Module):
 
-    def __init__(self, block, num_blocks, num_classes=10, use_norm=False, return_features=False):
+    def __init__(self, block, num_blocks, num_classes=10, use_norm=False, return_features=False, CAM=False):
         super(ResNet_s, self).__init__()
         factor = 1 
         self.in_planes = 16 * factor
@@ -87,6 +87,7 @@ class ResNet_s(nn.Module):
             self.fc = nn.Linear(64 * factor, num_classes)
         self.apply(_weights_init)
         self.return_encoding = return_features
+        self.CAM = CAM #-----------------------------!!!!!!!!!!!!!!!
         
 
     def _make_layer(self, block, planes, num_blocks, stride):
@@ -103,10 +104,19 @@ class ResNet_s(nn.Module):
         out = self.layer1(out)
         out = self.layer2(out)
         out = self.layer3(out)
-        #pdb.set_trace()
-        out = self.avgpool(out)
-        encoding = out.view(out.size(0), -1)
-        out = self.fc(encoding)
+
+        if not self.CAM:
+          # (0) original 
+          out = self.avgpool(out) # [B,64,8,8] -> [B,64,1,1]
+          encoding = out.view(out.size(0), -1) # [B,64,1,1] -> [B,64]
+          out = self.fc(encoding) # [B,64] -> [B,32]
+        else:
+          # (1) CAM version #------!!!!!!
+          tmp = self.avgpool(out) # just to hook
+          encoding = out.permute(0,2,3,1).reshape(-1, out.size(1)) # [B,64,8,8] -> [B,8,8,64] -> [B*8*8,64]
+          out = self.fc(encoding) #.view(out.size(0),8,8,-1) # [B*8*8,64] -> [B*8*8,32] #-> [B,8,8,32]
+          #encoding = encoding.view(out.size(0),8,8,-1)
+        
         if self.return_encoding:
             return out, encoding
         else:
@@ -117,8 +127,8 @@ def resnet20():
     return ResNet_s(BasicBlock, [3, 3, 3])
 
 
-def resnet32(num_classes=100, use_norm=False, return_features=False):
-    return ResNet_s(BasicBlock, [5, 5, 5], num_classes=num_classes, use_norm=use_norm, return_features=return_features)
+def resnet32(num_classes=100, use_norm=False, return_features=False, CAM=False):
+    return ResNet_s(BasicBlock, [5, 5, 5], num_classes=num_classes, use_norm=use_norm, return_features=return_features, CAM=CAM)
 
 
 def resnet44():

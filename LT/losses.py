@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-
+import pdb
 
 class PaCoLoss(nn.Module):
     def __init__(self, alpha, beta=1.0, gamma=1.0, supt=1.0, temperature=1.0, base_temperature=None, K=128, num_classes=1000):
@@ -21,20 +21,28 @@ class PaCoLoss(nn.Module):
         self.weight = cls_num_list / cls_num_list.sum()
         self.weight = self.weight.to(torch.device('cuda'))
 
-    def forward(self, features, labels=None, sup_logits=None, mask=None, epoch=None):
+    def forward(self, features, query, labels=None, labels_query=None, sup_logits=None, mask=None, epoch=None):
         device = (torch.device('cuda')
                   if features.is_cuda
                   else torch.device('cpu'))
 
         ss = features.shape[0]
-        batch_size = ( features.shape[0] - self.K ) // 2
+        #batch_size = ( features.shape[0] - self.K ) // 2
+        batch_size = ( features.shape[0] - self.K ) // 65  # if we use 8*8 grid as query -----!!!!!! 64+1
+        #batch_size = ( features.shape[0] - self.K ) // 128 # if we use 8*8 grid as query -----!!!!!! 64+64
+        
 
         labels = labels.contiguous().view(-1, 1)
-        mask = torch.eq(labels[:batch_size], labels.T).float().to(device)
+        #mask = torch.eq(labels[:batch_size], labels.T).float().to(device) #--------!!!!!! (1) for "repeat" or original
+        mask = torch.eq(labels[:batch_size*64:64], labels.T).float().to(device) #------!!!!! (2) for "repeat_interleave"
+        #mask = torch.eq(labels_query.contiguous().view(-1, 1), labels.T).float().to(device) #------!!!!! (3) take original query label
 
         # compute logits
+        #anchor_dot_contrast = torch.div(
+        #    torch.matmul(features[:batch_size], features.T),
+        #    self.temperature)
         anchor_dot_contrast = torch.div(
-            torch.matmul(features[:batch_size], features.T),
+            torch.matmul(query, features.T),
             self.temperature)
 
         # add supervised logits
@@ -45,16 +53,26 @@ class PaCoLoss(nn.Module):
         logits = anchor_dot_contrast - logits_max.detach()
 
         # mask-out self-contrast cases
-        logits_mask = torch.scatter(
+        # logits_mask = torch.scatter( #---------------------------!!!!! (1) q and query same size
+        #     torch.ones_like(mask),
+        #     1,
+        #     torch.arange(batch_size).view(-1, 1).to(device),
+
+        #     0
+        # )
+        logits_mask = torch.scatter( #---------------------------!!!!! (2) q and query different (pixel q)
             torch.ones_like(mask),
-            1,
-            torch.arange(batch_size).view(-1, 1).to(device),
+            0,
+            torch.arange(batch_size).repeat_interleave(64).view(1,-1).to(device),
+
             0
         )
         mask = mask * logits_mask
 
         # add ground truth 
-        one_hot_label = torch.nn.functional.one_hot(labels[:batch_size,].view(-1,), num_classes=self.num_classes).to(torch.float32)
+        #one_hot_label = torch.nn.functional.one_hot(labels[:batch_size,].view(-1,), num_classes=self.num_classes).to(torch.float32) #--------!!!!!! (1) for "repeat" or original
+        one_hot_label = torch.nn.functional.one_hot(labels[:batch_size*64:64,].view(-1,), num_classes=self.num_classes).to(torch.float32) #------!!!!! (2) for "repeat_interleave"
+        #one_hot_label = torch.nn.functional.one_hot(labels_query.contiguous().view(-1,), num_classes=self.num_classes).to(torch.float32) #------!!!!! (3) take original query label
         mask = torch.cat((one_hot_label * self.beta, mask * self.alpha), dim=1)
 
         # compute log_prob

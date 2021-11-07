@@ -464,8 +464,10 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
             target = target.cuda(args.gpu, non_blocking=True)
 
         # compute output
-        features, labels, logits = model(im_q=images[0], im_k=images[1], labels=target)
-        loss = criterion(features, labels, logits, epoch=epoch)
+        #features, labels, logits = model(im_q=images[0], im_k=images[1], labels=target)
+        #loss = criterion(features, labels, logits, epoch=epoch)
+        features, labels, labels_query, logits, query = model(im_q=images[0], im_k=images[1], labels=target)#--------!!!!!!!
+        loss = criterion(features, query, labels, labels_query, logits,  epoch=epoch) #---------!!!!!!!
 
         total_logits = torch.cat((total_logits, logits))
         total_labels = torch.cat((total_labels, target))
