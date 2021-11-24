@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import Parameter
 import pdb
+from torchvision.utils import save_image
 
 class NormedLinear_Classifier(nn.Module):
 
@@ -41,7 +42,7 @@ class MoCo(nn.Module):
         # create the encoders
         # num_classes is the output fc dimension
         self.encoder_q = base_encoder(num_classes=dim, CAM=True, return_features=True)#----------------!!!!!!
-        self.encoder_k = base_encoder(num_classes=dim, CAM=False, return_features=False)#---------------!!!!!!
+        self.encoder_k = base_encoder(num_classes=dim, CAM=True, return_features=True)#---------------!!!!!!
         self.linear = nn.Linear(feat_dim, num_classes)
         self.linear_k = nn.Linear(feat_dim, num_classes)
 
@@ -219,7 +220,15 @@ class MoCo(nn.Module):
         q = nn.functional.normalize(q, dim=1)
 
         q_labels = self.linear(q_encoding).view(-1,8,8,self.linear.weight.shape[0]) #----!!!!! CAM for q
-        q_labels = q_labels.argmax(3).view(-1) #----!!!!!
+
+        if False:
+            CAM = q_labels.argmax(3)
+            CAM_tmp = torch.nn.UpsamplingBilinear2d(scale_factor=8)(torch.eq(CAM.view(128,64),labels.unsqueeze(1)).view(128,8,8).float().unsqueeze(0))[0]
+            for iid in range(128):
+                save_image(CAM_tmp[iid], 'CAM/image%d.png'%(iid))
+
+        #q_labels = q_labels.argmax(3).view(-1) #----!!!!! (1) [128,8,8] -> [128*8*8]
+        q_labels = q_labels.argmax(3).permute(1,2,0).reshape(-1) #----!!!!! (2) [128,8,8] -> [8,8,128] -> [8*8*128]
 
 
 
@@ -230,30 +239,36 @@ class MoCo(nn.Module):
             # shuffle for making use of BN
             im_k, labels, idx_unshuffle = self._batch_shuffle_ddp(im_k, labels)
 
-            k = self.encoder_k(im_k)  # keys: NxC # queries: NxC #----!!! (1) w/o encoding output
-            #k, k_encoding = self.encoder_k(im_k)  # keys: NxC # queries: NxC #----!!! (2) w/ encoding output
+            #k = self.encoder_k(im_k)  # keys: NxC # queries: NxC #----!!! (1) w/o encoding output
+            k, k_encoding = self.encoder_k(im_k)  # keys: NxC # queries: NxC #----!!! (2) w/ encoding output
+
+            #k = self.predictor(k) #----!!!! (2) if predictor  on k
+
             k = nn.functional.normalize(k, dim=1)
 
-            #k_labels = self.linear_k(k_encoding).view(-1,8,8,self.linear_k.weight.shape[0]) #----!!!!! CAM for k
-            #k_labels = k_labels.argmax(3).view(-1) #----!!!!!
+            k_labels = self.linear_k(k_encoding).view(-1,8,8,self.linear_k.weight.shape[0]) #----!!!!! CAM for k
+            #k_labels = k_labels.argmax(3).view(-1) #----!!!!! (1) [128,8,8] -> [128*8*8]
+            k_labels = k_labels.argmax(3).permute(1,2,0).reshape(-1) #----!!!!! (2) [128,8,8] -> [8,8,128] -> [8*8*128]
 
             # undo shuffle
-            k, labels = self._batch_unshuffle_ddp(k, labels, idx_unshuffle) #---- (1) if k is global level
-            #k, labels = self._batch_unshuffle_ddp(k.view(-1,8,8,k.size(1)), labels, idx_unshuffle) #---- (2) if k is pixel level
-            #k = k.view(-1, k.size(3)) #---- (2)
+            #k, labels = self._batch_unshuffle_ddp(k, labels, idx_unshuffle) #---- (1) if k is global level
+            k, labels = self._batch_unshuffle_ddp(k.view(-1,8,8,k.size(1)), labels, idx_unshuffle) #---- (2) if k is pixel level
+            k = k.view(-1, k.size(3)) #---- (2)
 
         # compute logits
         features = torch.cat((q, k, self.queue.clone().detach()), dim=0)
         #target = torch.cat((labels, labels, self.queue_l.clone().detach()), dim=0)
         #target = torch.cat((labels.repeat(64), labels, self.queue_l.clone().detach()), dim=0) #----!!!!!! repeat q label
-        #target = torch.cat((labels.repeat_interleave(64), labels, self.queue_l.clone().detach()), dim=0) #----!!!!!! repeat q label
+        ##target = torch.cat((labels.repeat_interleave(64), labels, self.queue_l.clone().detach()), dim=0) #----!!!!!! repeat q label
         #target = torch.cat((labels.repeat(64), labels.repeat(64), self.queue_l.clone().detach()), dim=0) #----!!!!!! repeat q+k label
-        #target = torch.cat((labels.repeat_interleave(64), labels.repeat_interleave(64), self.queue_l.clone().detach()), dim=0) #----!!!!!! repeat q+k label
-        target = torch.cat((q_labels, labels, self.queue_l.clone().detach()), dim=0) #----!!!!!! q_CAM
+        ##target = torch.cat((labels.repeat_interleave(64), labels.repeat_interleave(64), self.queue_l.clone().detach()), dim=0) #----!!!!!! repeat q+k label
+        #target = torch.cat((q_labels.clone().detach(), labels, self.queue_l.clone().detach()), dim=0) #----!!!!!! q_CAM
+        target = torch.cat((q_labels.clone().detach(), k_labels.clone().detach(), self.queue_l.clone().detach()), dim=0) #----!!!!!! q_CAM
 
-        self._dequeue_and_enqueue(k, labels) #-- (1) if k is B, use it as it is
-        #sample_idx = torch.LongTensor(range(128))*64 + torch.randint(0,64,(128,)) #----!!!! (2)
-        #self._dequeue_and_enqueue(k[sample_idx], labels)#---- (2) if k is B*64, randomly sample one region
+        #self._dequeue_and_enqueue(k, labels) #-- (1) if k is B, use it as it is
+        sample_idx = torch.LongTensor(range(128))*64 + torch.randint(0,64,(128,)) #----!!!! (2)
+        #self._dequeue_and_enqueue(k[sample_idx], labels)#---- (2)(1) if k is B*64, randomly sample one region. GT label.
+        self._dequeue_and_enqueue(k[sample_idx], k_labels[sample_idx])#---- (2)(2) if k is B*64, randomly sample one region. CAM label.
 
         # compute logits 
         logits_q = self.linear(self.feat_after_avg_q) ##--------------------------!!!!!
@@ -262,7 +277,18 @@ class MoCo(nn.Module):
 
     def _inference(self, image):
         #q = self.encoder_q(image) #----!!! (1) w/o encoding output
-        q,_ = self.encoder_q(image) #----!!! (2) w/ encoding output
+        q,q_encoding = self.encoder_q(image) #----!!! (2) w/ encoding output
+
+        if False:
+            q_labels = self.linear(q_encoding).view(-1,8,8,self.linear.weight.shape[0]) #----!!!!! CAM for q
+            CAM = q_labels.argmax(3)
+            for cid in range(100):
+                iid = 0
+                CAM_tmp = torch.nn.UpsamplingBilinear2d(scale_factor=8)((CAM==cid).float().unsqueeze(0))[0]
+                #if CAM_tmp.size(0) != 100:
+                #    pdb.set_trace()
+                save_image(CAM_tmp[iid], 'CAM/image%d.png'%(cid))
+
         q = nn.functional.normalize(q, dim=1)
         encoder_q_logits = self.linear(self.feat_after_avg_q)
 

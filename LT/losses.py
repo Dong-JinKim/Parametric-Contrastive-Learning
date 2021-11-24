@@ -28,14 +28,14 @@ class PaCoLoss(nn.Module):
 
         ss = features.shape[0]
         #batch_size = ( features.shape[0] - self.K ) // 2
-        batch_size = ( features.shape[0] - self.K ) // 65  # if we use 8*8 grid as query -----!!!!!! 64+1
-        #batch_size = ( features.shape[0] - self.K ) // 128 # if we use 8*8 grid as query -----!!!!!! 64+64
+        #batch_size = ( features.shape[0] - self.K ) // 65  # if we use 8*8 grid as query -----!!!!!! 64+1
+        batch_size = ( features.shape[0] - self.K ) // 128 # if we use 8*8 grid as query -----!!!!!! 64+64
         
 
         labels = labels.contiguous().view(-1, 1)
         #mask = torch.eq(labels[:batch_size], labels.T).float().to(device) #--------!!!!!! (1) for "repeat" or original
-        mask = torch.eq(labels[:batch_size*64:64], labels.T).float().to(device) #------!!!!! (2) for "repeat_interleave"
-        #mask = torch.eq(labels_query.contiguous().view(-1, 1), labels.T).float().to(device) #------!!!!! (3) take original query label
+        #mask = torch.eq(labels[:batch_size*64:64], labels.T).float().to(device) #------!!!!! (2) for "repeat_interleave"
+        mask = torch.eq(labels_query.contiguous().view(-1, 1), labels.T).float().to(device) #------!!!!! (3) take original query label
 
         # compute logits
         #anchor_dot_contrast = torch.div(
@@ -71,8 +71,8 @@ class PaCoLoss(nn.Module):
 
         # add ground truth 
         #one_hot_label = torch.nn.functional.one_hot(labels[:batch_size,].view(-1,), num_classes=self.num_classes).to(torch.float32) #--------!!!!!! (1) for "repeat" or original
-        one_hot_label = torch.nn.functional.one_hot(labels[:batch_size*64:64,].view(-1,), num_classes=self.num_classes).to(torch.float32) #------!!!!! (2) for "repeat_interleave"
-        #one_hot_label = torch.nn.functional.one_hot(labels_query.contiguous().view(-1,), num_classes=self.num_classes).to(torch.float32) #------!!!!! (3) take original query label
+        #one_hot_label = torch.nn.functional.one_hot(labels[:batch_size*64:64,].view(-1,), num_classes=self.num_classes).to(torch.float32) #------!!!!! (2) for "repeat_interleave"
+        one_hot_label = torch.nn.functional.one_hot(labels_query.contiguous().view(-1,), num_classes=self.num_classes).to(torch.float32) #------!!!!! (3) take original query label
         mask = torch.cat((one_hot_label * self.beta, mask * self.alpha), dim=1)
 
         # compute log_prob
