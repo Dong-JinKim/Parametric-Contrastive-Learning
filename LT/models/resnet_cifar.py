@@ -72,6 +72,7 @@ class ResNet_s(nn.Module):
 
     def __init__(self, block, num_blocks, num_classes=10, use_norm=False, return_features=False, CAM=False):
         super(ResNet_s, self).__init__()
+        self.CAM = CAM #-----------------------------!!!!!!!!!!!!!!!
         factor = 1 
         self.in_planes = 16 * factor
 
@@ -84,10 +85,13 @@ class ResNet_s(nn.Module):
         if use_norm:
             self.fc = NormedLinear(64 * factor, num_classes)
         else:
-            self.fc = nn.Linear(64 * factor, num_classes)
+            if self.CAM:
+                self.fc = nn.Conv2d(64 * factor, num_classes, kernel_size=1, stride=1, padding=0, bias=False) #----!!!!
+            else:
+                self.fc = nn.Linear(64 * factor, num_classes)
         self.apply(_weights_init)
         self.return_encoding = return_features
-        self.CAM = CAM #-----------------------------!!!!!!!!!!!!!!!
+        
         
 
     def _make_layer(self, block, planes, num_blocks, stride):
@@ -113,8 +117,18 @@ class ResNet_s(nn.Module):
         else:
           # (1) CAM version #------!!!!!!
           tmp = self.avgpool(out) # just to hook
-          encoding = out.permute(0,2,3,1).reshape(-1, out.size(1)) # [B,64,8,8] -> [B,8,8,64] -> [B*8*8,64]
-          out = self.fc(encoding) #.view(out.size(0),8,8,-1) # [B*8*8,64] -> [B*8*8,32] #-> [B,8,8,32]
+          
+          # FC version
+          #encoding = out.permute(0,2,3,1).reshape(-1, out.size(1)) # [B,64,8,8] -> [B,8,8,64] -> [B*8*8,64]
+          #out = self.fc(encoding) #.view(out.size(0),8,8,-1) # [B*8*8,64] -> [B*8*8,32] #-> [B,8,8,32]
+          
+          # 1X1conv version
+          encoding =  out # [B,64,8,8]
+          out = self.fc(out).reshape(-1,32,8*8) # [B,64,8,8] -> [B,32,8,8] -> [B,32,8*8]
+
+
+
+
           #encoding = encoding.view(out.size(0),8,8,-1)
         
         if self.return_encoding:

@@ -42,11 +42,11 @@ class MoCo(nn.Module):
         # create the encoders
         # num_classes is the output fc dimension
         self.encoder_q = base_encoder(num_classes=dim, CAM=True, return_features=True)#----------------!!!!!!
-        self.encoder_k = base_encoder(num_classes=dim, CAM=True, return_features=True)#---------------!!!!!!
+        self.encoder_k = base_encoder(num_classes=dim, CAM=False, return_features=True)#---------------!!!!!!
         self.linear = nn.Linear(feat_dim, num_classes)
         self.linear_k = nn.Linear(feat_dim, num_classes)
 
-        predictor_r = 4 #----!!!
+        predictor_r = 2 #----!!!
         self.predictor = nn.Sequential(nn.ReLU(inplace=True), nn.Linear(dim,int(dim/predictor_r),bias=False), nn.BatchNorm1d(int(dim/predictor_r)), nn.ReLU(inplace=True), nn.Linear(int(dim/predictor_r),dim))#----------!!!!!!!
 
 
@@ -209,13 +209,13 @@ class MoCo(nn.Module):
         #q = self.encoder_q(im_q)  # queries: NxC #----!!! (1) w/o encoding output
         q, q_encoding = self.encoder_q(im_q)  # queries: NxC #----!!! (2) w/ encoding output
 
-        query = self.predictor(q.view(-1,8,8,q.size(1)).mean([1,2])) # [B*8*8,32] -> [B,8,8,32] -> [B,32] -> [B,32] (1) w/ predictor
-        #query = q.view(-1,8,8,q.size(1)).mean([1,2]) # [B*8*8,32] -> [B,8,8,32] -> [B,32] (2) w/o predictor
+        #query = self.predictor(q.view(-1,8,8,q.size(1)).mean([1,2])) # [B*8*8,32] -> [B,8,8,32] -> [B,32] -> [B,32] (1) w/ predictor
+        query = q.view(-1,8,8,q.size(1)).mean([1,2]) # [B*8*8,32] -> [B,8,8,32] -> [B,32] (2) w/o predictor
 
         query = nn.functional.normalize(query,dim=1)
         
         
-        #q = self.predictor(q) #----!!!! (2) if predictor  on q
+        q = self.predictor(q) #----!!!! (2) if predictor  on q
 
         q = nn.functional.normalize(q, dim=1)
 
@@ -251,24 +251,24 @@ class MoCo(nn.Module):
             k_labels = k_labels.argmax(3).permute(1,2,0).reshape(-1) #----!!!!! (2) [128,8,8] -> [8,8,128] -> [8*8*128]
 
             # undo shuffle
-            #k, labels = self._batch_unshuffle_ddp(k, labels, idx_unshuffle) #---- (1) if k is global level
-            k, labels = self._batch_unshuffle_ddp(k.view(-1,8,8,k.size(1)), labels, idx_unshuffle) #---- (2) if k is pixel level
-            k = k.view(-1, k.size(3)) #---- (2)
+            k, labels = self._batch_unshuffle_ddp(k, labels, idx_unshuffle) #---- (1) if k is global level
+            #k, labels = self._batch_unshuffle_ddp(k.view(-1,8,8,k.size(1)), labels, idx_unshuffle) #---- (2) if k is pixel level
+            #k = k.view(-1, k.size(3)) #---- (2)
 
         # compute logits
         features = torch.cat((q, k, self.queue.clone().detach()), dim=0)
         #target = torch.cat((labels, labels, self.queue_l.clone().detach()), dim=0)
-        #target = torch.cat((labels.repeat(64), labels, self.queue_l.clone().detach()), dim=0) #----!!!!!! repeat q label
+        target = torch.cat((labels.repeat(64), labels, self.queue_l.clone().detach()), dim=0) #----!!!!!! repeat q label
         ##target = torch.cat((labels.repeat_interleave(64), labels, self.queue_l.clone().detach()), dim=0) #----!!!!!! repeat q label
         #target = torch.cat((labels.repeat(64), labels.repeat(64), self.queue_l.clone().detach()), dim=0) #----!!!!!! repeat q+k label
         ##target = torch.cat((labels.repeat_interleave(64), labels.repeat_interleave(64), self.queue_l.clone().detach()), dim=0) #----!!!!!! repeat q+k label
         #target = torch.cat((q_labels.clone().detach(), labels, self.queue_l.clone().detach()), dim=0) #----!!!!!! q_CAM
-        target = torch.cat((q_labels.clone().detach(), k_labels.clone().detach(), self.queue_l.clone().detach()), dim=0) #----!!!!!! q_CAM
+        #target = torch.cat((q_labels.clone().detach(), k_labels.clone().detach(), self.queue_l.clone().detach()), dim=0) #----!!!!!! q_CAM
 
-        #self._dequeue_and_enqueue(k, labels) #-- (1) if k is B, use it as it is
-        sample_idx = torch.LongTensor(range(128))*64 + torch.randint(0,64,(128,)) #----!!!! (2)
+        self._dequeue_and_enqueue(k, labels) #-- (1) if k is B, use it as it is
+        #sample_idx = torch.LongTensor(range(128))*64 + torch.randint(0,64,(128,)) #----!!!! (2)
         #self._dequeue_and_enqueue(k[sample_idx], labels)#---- (2)(1) if k is B*64, randomly sample one region. GT label.
-        self._dequeue_and_enqueue(k[sample_idx], k_labels[sample_idx])#---- (2)(2) if k is B*64, randomly sample one region. CAM label.
+        #self._dequeue_and_enqueue(k[sample_idx], k_labels[sample_idx])#---- (2)(2) if k is B*64, randomly sample one region. CAM label.
 
         # compute logits 
         logits_q = self.linear(self.feat_after_avg_q) ##--------------------------!!!!!

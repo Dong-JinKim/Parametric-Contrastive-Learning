@@ -23,10 +23,10 @@ from models import resnet_cifar
 from autoaug import CIFAR10Policy, Cutout
 from randaugment import rand_augment_transform, GaussianBlur
 import moco.loader
-import moco.builder
+import moco.builder_hard # _base_prototype2
 from dataset.imbalance_cifar import ImbalanceCIFAR100
 import torchvision.datasets as datasets
-from losses import PaCoLoss
+from losses_base import PaCoLoss
 from utils import shot_acc
 import pdb
 
@@ -193,7 +193,7 @@ def main_worker(gpu, ngpus_per_node, args):
                                 world_size=args.world_size, rank=args.rank)
     # create model
     print("=> creating model '{}'".format(args.arch))
-    model = moco.builder.MoCo(
+    model = moco.builder_hard.MoCo(
         getattr(resnet_cifar, args.arch),
         args.moco_dim, args.moco_k, args.moco_m, args.moco_t, args.mlp, args.feat_dim, args.normalize, num_classes=args.num_classes)
     print(model)
@@ -464,10 +464,12 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
             target = target.cuda(args.gpu, non_blocking=True)
 
         # compute output
-        #features, labels, logits = model(im_q=images[0], im_k=images[1], labels=target)
-        #loss = criterion(features, labels, logits, epoch=epoch)
-        features, labels, labels_query, logits, query = model(im_q=images[0], im_k=images[1], labels=target)#--------!!!!!!!
-        loss = criterion(features, query, labels, labels_query, logits,  epoch=epoch) #---------!!!!!!!
+        features, labels, logits = model(im_q=images[0], im_k=images[1], labels=target)
+        loss = criterion(features, labels, logits, epoch=epoch)
+        #features, labels, labels_query, logits, query = model(im_q=images[0], im_k=images[1], labels=target)#--------!!!!!!!
+        #loss = criterion(features, query, labels, labels_query, logits,  epoch=epoch) #---------!!!!!!!
+        #features, labels, logits, prototypes = model(im_q=images[0], im_k=images[1], labels=target)
+        #loss = criterion(features, prototypes, labels, logits, epoch=epoch)
 
         total_logits = torch.cat((total_logits, logits))
         total_labels = torch.cat((total_labels, target))

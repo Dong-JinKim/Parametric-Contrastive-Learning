@@ -28,8 +28,8 @@ class PaCoLoss(nn.Module):
 
         ss = features.shape[0]
         #batch_size = ( features.shape[0] - self.K ) // 2
-        #batch_size = ( features.shape[0] - self.K ) // 65  # if we use 8*8 grid as query -----!!!!!! 64+1
-        batch_size = ( features.shape[0] - self.K ) // 128 # if we use 8*8 grid as query -----!!!!!! 64+64
+        batch_size = ( features.shape[0] - self.K ) // 65  # if we use 8*8 grid as query -----!!!!!! 64+1
+        #batch_size = ( features.shape[0] - self.K ) // 128 # if we use 8*8 grid as query -----!!!!!! 64+64
         
 
         labels = labels.contiguous().view(-1, 1)
