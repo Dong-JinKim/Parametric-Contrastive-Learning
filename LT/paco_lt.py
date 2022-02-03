@@ -26,12 +26,12 @@ from torch.cuda.amp import autocast
 from models import resnet_imagenet
 from randaugment import rand_augment_transform, GaussianBlur
 import moco.loader
-import moco.builder
+import moco.builder_base
 from dataset.imagenet import ImageNetLT
 from dataset.imagenet_moco import ImageNetLT_moco
 from dataset.inat import INaturalist
 from dataset.inat_moco import INaturalist_moco
-from losses import PaCoLoss
+from losses_base import PaCoLoss
 from utils import shot_acc
 
 
@@ -199,7 +199,7 @@ def main_worker(gpu, ngpus_per_node, args):
     # create model
     # num_classes = 8142 if args.dataset == 'inat' else 1000
     print("=> creating model '{}'".format(args.arch))
-    model = moco.builder.MoCo(
+    model = moco.builder_base.MoCo(
         models.__dict__[args.arch] if args.arch != 'resnext101_32x4d' else getattr(resnet_imagenet, args.arch),
         args.moco_dim, args.moco_k, args.moco_m, args.moco_t, args.mlp, args.feat_dim, args.normalize, num_classes=args.num_classes)
     print(model)
