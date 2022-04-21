@@ -23,12 +23,31 @@ from models import resnet_cifar
 from autoaug import CIFAR10Policy, Cutout
 from randaugment import rand_augment_transform, GaussianBlur
 import moco.loader
-import moco.builder_hard # _base_prototype2
+import moco.builder_hard2 # _base_prototype2
 from dataset.imbalance_cifar import ImbalanceCIFAR100
 import torchvision.datasets as datasets
 from losses_base import PaCoLoss
 from utils import shot_acc
 import pdb
+import sys#---!!
+from kmeans_pytorch import kmeans #----!!!!!
+
+class NoStdStreams(object):
+    def __init__(self,stdout = None, stderr = None):
+        self.devnull = open(os.devnull,'w')
+        self._stdout = stdout or self.devnull or sys.stdout
+        self._stderr = stderr or self.devnull or sys.stderr
+
+    def __enter__(self):
+        self.old_stdout, self.old_stderr = sys.stdout, sys.stderr
+        self.old_stdout.flush(); self.old_stderr.flush()
+        sys.stdout, sys.stderr = self._stdout, self._stderr
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._stdout.flush(); self._stderr.flush()
+        sys.stdout = self.old_stdout
+        sys.stderr = self.old_stderr
+        self.devnull.close()
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
@@ -67,7 +86,7 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
 parser.add_argument('--wd', '--weight-decay', default=5e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)',
                     dest='weight_decay')
-parser.add_argument('-p', '--print-freq', default=40, type=int,
+parser.add_argument('-p', '--print-freq', default=40000, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
@@ -193,7 +212,7 @@ def main_worker(gpu, ngpus_per_node, args):
                                 world_size=args.world_size, rank=args.rank)
     # create model
     print("=> creating model '{}'".format(args.arch))
-    model = moco.builder_hard.MoCo(
+    model = moco.builder_hard2.MoCo(
         getattr(resnet_cifar, args.arch),
         args.moco_dim, args.moco_k, args.moco_m, args.moco_t, args.mlp, args.feat_dim, args.normalize, num_classes=args.num_classes)
     print(model)
@@ -454,6 +473,19 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
     total_labels = torch.empty(0, dtype=torch.long).cuda()
 
     end = time.time()
+    
+    if epoch>100:
+        print('running kmeans....')
+        #with NoStdStreams():
+        #_, tmp = kmeans(X=model.module.queue.clone().detach(), num_clusters=50, distance='euclidean',device=torch.device('cuda:0'))
+        _, tmp = kmeans(X=model.module.queue_p.clone().detach(), num_clusters=200, distance='cosine',device=torch.device('cuda:0'))
+        if tmp.isnan().sum()==0:
+            model.module.cluster_centers = tmp.cuda()
+        else:
+            print("not updated")
+    else:
+        model.module.cluster_centers = None
+
     for i, (images, target) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
@@ -464,12 +496,17 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
             target = target.cuda(args.gpu, non_blocking=True)
 
         # compute output
-        features, labels, logits = model(im_q=images[0], im_k=images[1], labels=target)
-        loss = criterion(features, labels, logits, epoch=epoch)
+        #features, labels, logits, extra_loss = model(im_q=images[0], im_k=images[1], labels=target) #---!!!
+        features_local,features_global, labels, logits, extra_loss = model(im_q=images[0], im_k=images[1], labels=target) #---!!!
+        #loss = criterion(features, labels, logits, epoch=epoch)
+        loss = criterion(features_local, labels, logits, epoch=epoch)*0.1 + criterion(features_global, labels, logits, epoch=epoch)*0.9
+        #loss = criterion(features, sup_labels, labels, logits, epoch=epoch)
         #features, labels, labels_query, logits, query = model(im_q=images[0], im_k=images[1], labels=target)#--------!!!!!!!
         #loss = criterion(features, query, labels, labels_query, logits,  epoch=epoch) #---------!!!!!!!
         #features, labels, logits, prototypes = model(im_q=images[0], im_k=images[1], labels=target)
         #loss = criterion(features, prototypes, labels, logits, epoch=epoch)
+        if epoch>100:
+            loss = loss + extra_loss * 0.1
 
         total_logits = torch.cat((total_logits, logits))
         total_labels = torch.cat((total_labels, target))
